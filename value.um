@@ -1,0 +1,190 @@
+import (
+	"std.um"
+)
+
+type (
+	T* = interface{
+		string(): str
+		typename(): str
+		isBottom(): bool
+	}
+
+	List* = []T
+	Sym*  = str
+
+	Bottom* = struct{
+		message: str
+		callStack: []List
+	}
+
+	// *not* any, env::T
+	Prim* = fn(args: List, e: any, error: fn(msg: str): Bottom): T
+
+	Fn* = struct{
+		params: []Sym
+		expr: T
+	}
+)
+
+fn (_: ^List) isBottom*(): bool   { return false }
+fn (_: ^Sym) isBottom*(): bool    { return false }
+fn (_: ^Bottom) isBottom*(): bool { return true  }
+fn (_: ^Prim) isBottom*(): bool   { return false }
+fn (_: ^Fn) isBottom*(): bool     { return false }
+
+fn (_: ^List) typename*(): str { return "list" }
+
+fn (l: ^List) isQuote*(): bool {
+	if len(l^) == 2 {
+		if s := ^Sym(l^[0]); s != null && s^ == "quote" {
+			return true
+		}
+	}
+	return false
+}
+
+fn listToString(l: []T): str {
+	s := "("
+	for i in l {
+		s += l[i].string()
+		if i < len(l)-1 { s += ' ' }
+	}
+	return s + ')'
+}
+
+fn (l: ^List) string*(): str {
+	if l.isQuote() { return "'" + l^[1].string() }
+	return listToString(l^)
+}
+
+fn (_: ^Sym) typename*(): str { return "symbol" }
+fn (s: ^Sym) string*(): str   { return s^ }
+
+fn (_: ^Prim) typename*(): str { return "primitive" }
+fn (_: ^Prim) string*(): str   { return "<primitive>" }
+
+fn (_: ^Fn) typename*(): str { return "function" }
+fn (f: ^Fn) string*(): str {
+	return sprintf(
+		"(λ %s %s)",
+		List(f.params).string(),
+		f.expr.string()
+	)
+}
+
+fn (_: ^Bottom) typename*(): str {
+	fprintf(
+		std::stderr(),
+		"warning on prim impl: `.typename()` should never be called on a bottom; instead, return the value\n"
+	)
+	return "bottom"
+}
+
+fn (b: ^Bottom) string*(): str { return sprintf("⊥: %s", b.message)  }
+
+////////////////////////////////////////////////////////////////////////
+
+var (
+	source: str
+	position, line: int
+)
+
+fn isSpace(c: char): bool {
+	return c == ' ' || c == '\n' || c == '\r' || c == '\t'
+}
+
+fn isAtEnd(): bool { return position >= len(source) }
+
+fn peek(): char {
+	if isAtEnd() { return '\0' }
+	return source[position]
+}
+
+fn advance(): char {
+	c := peek()
+	position++
+	if c == '\n' { line++ }
+	return c
+}
+
+fn nextTok(): str {
+	for isSpace(peek()) { advance() }
+
+	if isAtEnd() { return "" }
+
+	c := advance()
+	switch c {
+	case ';':
+		for !(isAtEnd() || peek() == '\n') { advance() }
+		return nextTok()
+	case '(', ')', '\'': return str(c)
+	}
+
+	sym := str(c)
+	for !isAtEnd() {
+		c := peek()
+		if isSpace(c) || c == ';' || c == '(' || c == ')' || c == '\'' {
+			break
+		}
+		sym += advance()
+	}
+	return sym
+}
+
+////////////////////////////////////////////////////////////////////////
+
+type (RParen = struct{line: int}; Eof* = struct{})
+
+fn (r: ^RParen) string*(): str    { std::assert(false); return ""    }
+fn (r: ^RParen) typename*(): str  { std::assert(false); return ""    }
+fn (r: ^RParen) isBottom*(): bool { std::assert(false); return false }
+fn (r: ^Eof) string*(): str       { std::assert(false); return ""    }
+fn (r: ^Eof) typename*(): str     { std::assert(false); return ""    }
+fn (r: ^Eof) isBottom*(): bool    { return false }
+
+fn readForm(): (T, std::Err)
+
+fn readList(): (T, std::Err) {
+	startLine := line
+	var l: List
+	for true {
+		v, e := readForm()
+		if e.code != 0 { return v, e }
+		if ^RParen(v) != null { break }
+		if ^Eof(v) != null {
+			return Bottom{}, std::error(line,
+				sprintf("unclosed list (starting at line %i)", startLine))
+		}
+		l = append(l, v)
+	}
+	return l, {}
+}
+
+fn readForm(): (T, std::Err) {
+	t := nextTok()
+	if len(t) == 0 { return Eof{}, {} }
+
+	switch t[0] {
+	case '(': return readList()
+	case ')': return RParen{}, {}
+	case '\'':
+		v, e := readForm()
+		if e.code != 0 { return v, e }
+		if ^Eof(v) != null { return Bottom{}, {} }
+		return List{Sym("quote"), v}, {}
+	}
+
+	return Sym(t), {}
+}
+
+fn read*(s: str): (T, std::Err) {
+	source = s
+	position, line = 0, 1
+
+	v, e := readForm()
+	if e.code != 0 { return v, e }
+	if p := ^RParen(v); p != null {
+		return Bottom{}, std::error(p.line, "stray ')'")
+	}
+	return v, {}
+}

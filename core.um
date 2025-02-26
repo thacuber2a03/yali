@@ -1,0 +1,61 @@
+import (
+	"std.um"
+
+	"env.um"
+	"value.um"
+)
+
+fn ns*(): env::T {
+	core := env::mk()
+
+	core.set("append", value::Prim{
+		if len(args) != 2 {
+			return error(sprintf("expected 2 args for 'append', got %i", len(args)))
+		}
+
+		a := ^value::List(args[0])
+		if a == null {
+			return error(sprintf(
+				"expected arg. 1 to 'append' to be a list, was a %s",
+				args[0].typename()
+			))
+		}
+
+		b := ^value::List(args[1])
+		if b == null {
+			return error(sprintf(
+				"expected arg. 2 to 'append' to be a list, was a %s",
+				args[1].typename()
+			))
+		}
+
+		// TODO: core functions shouldn't need to do this? like, at all???
+		return value::List(append(copy(a^), copy(b^)))
+	})
+
+	core.set("list", value::Prim{ return args })
+
+	core.set("reverse", value::Prim{
+		if len(args) != 1 {
+			return error(sprintf(
+				"expected 1 argument for 'reverse', got %i", len(args)
+			))
+		}
+
+		l := ^value::List(args[0])
+		if l == null {
+			return error(sprintf(
+				"expected arg. 1 to 'reverse' to be a list, was a %s",
+				args[0].typename()
+			))
+		}
+
+		ret := make(value::List, len(l^))
+		for i in l {
+			ret[len(ret)-i-1] = l[i]
+		}
+		return ret
+	})
+
+	return core
+}

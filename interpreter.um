@@ -1,0 +1,119 @@
+import (
+	"std.um"
+
+	"env.um"
+	"value.um"
+	"core.um"
+)
+
+type T* = struct{
+	global: env::T
+	callStack: []value::List
+}
+
+fn (i: ^T) error(msg: str): value::Bottom {
+	return value::Bottom{
+		message: msg,
+		callStack: i.callStack
+	}
+}
+
+fn (i: ^T) pushCall(v: value::List) {
+	i.callStack = append(i.callStack, v)
+}
+
+fn (i: ^T) popCall() {
+	i.callStack = slice(i.callStack, 0, len(i.callStack)-1)
+}
+
+fn (i: ^T) evalValue(v: value::T, e: env::T): value::T
+
+fn (i: ^T) evalValue(value: value::T, e: env::T): value::T {
+	for true {
+		switch v := type(value) {
+		case value::List:
+			if len(v) == 0 { return v }
+			i.pushCall(v)
+
+			if s := ^value::Sym(v[0]); s != null {
+				s := s^
+				if s == "quote" {
+					i.popCall()
+					return v[1]
+				} else if s == "define" {
+					l := slice(v, 1, len(v))
+					switch v := type(l[0]) {
+					case value::List:
+						params := []value::Sym{}
+						for _,v in v {
+							s := ^value::Sym(v)
+							if s == null { return i.error("all elements of the first arg. of a func. def. must be symbols") }
+							params = append(params, s^)
+						}
+
+						value = e.set(params[0], value::Fn{
+							params: slice(params, 1, len(params)),
+							expr: l[1]
+						})
+						continue
+					case value::Sym:
+						e.set(v, i.evalValue(l[1], e))
+						value = v
+						continue
+					default:
+						return i.error("expected symbol or list as first argument to define") 
+					}
+				}
+			}
+
+			args := value::List{}
+			for _,v in v {
+				v := i.evalValue(v, e)
+				if v.isBottom() { return v }
+				args = append(args, v)
+			}
+			f := args[0]
+			args = slice(args, 1, len(args))
+
+			if p := ^value::Prim(f); p != null {
+				res := p(args, any(e), |i|{ return i.error(msg) })
+				i.popCall()
+				return res
+			} else if f := ^value::Fn(f); f != null {
+				newe := env::mk()
+				newe.outer = e
+				for i in f.params {
+					newe.set(f.params[i], args[i])
+				}
+				e = newe
+				value = f.expr
+				continue
+			} else {
+				return i.error("attempt to call uncallable value")
+			}
+
+		case value::Sym:
+			r := e.get(v)
+			if r.isBottom() { value::Bottom(r).callStack = i.callStack }
+			return r
+
+		case value::Fn: return v
+
+		case value::Bottom: return v
+		case value::Eof: return v
+		}
+
+		break
+	}
+	std::assert(false, sprintf("unreachable branch for value %v", value))
+	return value::Bottom{}
+}
+
+fn (i: ^T) eval*(v: value::T): value::T {
+	i.callStack = {}
+	return i.evalValue(v, i.global) 
+}
+
+fn mk*(): ^T {
+	return &T{ global: core::ns() }
+}

@@ -1,0 +1,58 @@
+import (
+	"std.um"
+
+	"value.um"
+	"interpreter.um"
+)
+
+// TODO:
+// - read code from a file
+// - write tests (ughhhhhh)
+// - continue implementing standard lib
+
+fn getline(): (str, bool) {
+	var line: str
+	for true {
+		var c: char
+		if n,e := std::fread(std::stdin(), &c); n == 0 {
+			std::assert(e.code == int(std::StdErr.eof))
+			return line, true
+		}
+		if c == '\n' {
+			break
+		}
+		line += c
+	}
+	return line, false
+}
+
+fn repl() {
+	i := interpreter::mk()
+	for true {
+		printf("> ")
+		input, eof := getline()
+		if eof { break }
+		ast, e := value::read(input)
+		if e.code != 0 {
+			printf("[line %i] %s\n", e.code, e.msg)
+			continue 
+		}
+
+		r := i.eval(ast)
+		if r.isBottom() && value::Bottom(r).message == "" {
+			continue
+		}
+
+		printf("%s\n", r.string())
+		if r.isBottom() {
+			r := value::Bottom(r)
+			for _,v in r.callStack {
+				printf("=> %s\n", v.string())
+			}
+		}
+	}
+}
+
+fn main() {
+	repl()
+}
