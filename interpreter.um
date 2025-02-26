@@ -82,7 +82,7 @@ fn (i: ^T) evalValue(value: value::T, e: env::T): value::T {
 			} else if f := ^value::Fn(f); f != null {
 				newe := env::mk()
 				newe.outer = e
-				for i in f.params {
+				for i in args {
 					newe.set(f.params[i], args[i])
 				}
 				e = newe
